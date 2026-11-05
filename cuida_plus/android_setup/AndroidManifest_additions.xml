@@ -1,0 +1,26 @@
+<!-- Adicione em android/app/src/main/AndroidManifest.xml -->
+
+<!-- 1) Fora de <application>, dentro de <manifest>: -->
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+<uses-permission android:name="android.permission.VIBRATE"/>
+<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+
+<!-- 2) Dentro de <application>: reagendar lembretes após reiniciar o aparelho -->
+<receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"/>
+<receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+  <intent-filter>
+    <action android:name="android.intent.action.BOOT_COMPLETED"/>
+    <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+    <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+    <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+  </intent-filter>
+</receiver>
+
+<!-- 3) Analytics desligado até o consentimento do usuário -->
+<meta-data android:name="firebase_analytics_collection_enabled" android:value="false"/>
+
+<!-- 4) android/app/build.gradle(.kts): ative desugaring exigido pelo flutter_local_notifications
+       compileOptions { isCoreLibraryDesugaringEnabled = true }
+       dependencies { coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:<versão atual>") }
+     e confira minSdk compatível com o Firebase (use o valor exigido pelo `flutter doctor`/build). -->

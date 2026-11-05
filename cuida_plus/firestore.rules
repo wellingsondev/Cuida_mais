@@ -1,0 +1,157 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function authed() { return request.auth != null; }
+    function verified() { return authed() && request.auth.token.email_verified == true; }
+    function isSelf(uid) { return authed() && request.auth.uid == uid; }
+    function ownerVerified(pid) { return verified() && request.auth.uid == pid; }
+    function relPath(pid) {
+      return /databases/$(database)/documents/family_relationships/$(pid + '_' + request.auth.uid);
+    }
+    function activeRel(pid) {
+      return exists(relPath(pid)) && get(relPath(pid)).data.status == 'active';
+    }
+    // paciente (dono) OU familiar com vínculo ativo e a permissão específica
+    function canSee(pid, perm) {
+      return verified() && (request.auth.uid == pid ||
+        (activeRel(pid) && get(relPath(pid)).data.permissions[perm] == true));
+    }
+    function str(v, max) { return v is string && v.size() > 0 && v.size() <= max; }
+    function optStr(v, max) { return v is string && v.size() <= max; }
+    function changed(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // ---------- users / patients ----------
+    match /users/{uid} {
+      allow read: if isSelf(uid);
+      allow create: if isSelf(uid)
+        && request.resource.data.role in ['patient', 'caregiver']
+        && str(request.resource.data.name, 100)
+        && request.resource.data.email == request.auth.token.email;
+      allow update: if isSelf(uid) && !changed(['role', 'email', 'createdAt']);
+      allow delete: if false; // exclusão via Cloud Function deleteMyData
+    }
+
+    match /patients/{pid} {
+      allow read: if verified() && (request.auth.uid == pid || activeRel(pid));
+      allow create: if isSelf(pid) && request.resource.data.ownerUid == pid;
+      allow update: if isSelf(pid) && request.resource.data.ownerUid == pid;
+      allow delete: if false;
+    }
+
+    // ---------- medicamentos ----------
+    function validMed(d) {
+      return str(d.name, 100) && str(d.dosage, 100)
+        && optStr(d.form, 50) && optStr(d.notes, 1000)
+        && d.startDate is timestamp
+        && (d.endDate == null || (d.endDate is timestamp && d.endDate >= d.startDate))
+        && d.active is bool && d.remindersEnabled is bool && d.archived is bool;
+    }
+    match /medications/{id} {
+      allow read: if canSee(resource.data.patientId, 'canViewMedications');
+      allow create: if ownerVerified(request.resource.data.patientId) && validMed(request.resource.data);
+      allow update: if ownerVerified(resource.data.patientId)
+        && request.resource.data.patientId == resource.data.patientId
+        && validMed(request.resource.data);
+      allow delete: if ownerVerified(resource.data.patientId);
+    }
+
+    function validSched(d) {
+      return d.hour is int && d.hour >= 0 && d.hour < 24
+        && d.minute is int && d.minute >= 0 && d.minute < 60
+        && str(d.timezone, 64) && d.active is bool
+        && getAfter(/databases/$(database)/documents/medications/$(d.medicationId)).data.patientId == d.patientId;
+    }
+    match /medication_schedules/{id} {
+      allow read: if canSee(resource.data.patientId, 'canViewSchedules');
+      allow create: if ownerVerified(request.resource.data.patientId) && validSched(request.resource.data);
+      allow update: if ownerVerified(resource.data.patientId)
+        && !changed(['patientId', 'medicationId']) && validSched(request.resource.data);
+      allow delete: if ownerVerified(resource.data.patientId);
+    }
+
+    // ---------- histórico (registros do que o usuário informou) ----------
+    function validLog(d) {
+      return d.status in ['confirmed', 'pending', 'not_done', 'postponed']
+        && d.scheduledAt is timestamp && d.actorUid == request.auth.uid
+        && str(d.medicationName, 100);
+    }
+    match /medication_logs/{id} {
+      allow read: if canSee(resource.data.patientId, 'canViewHistory');
+      allow create: if ownerVerified(request.resource.data.patientId) && validLog(request.resource.data);
+      allow update: if ownerVerified(resource.data.patientId) && validLog(request.resource.data)
+        && !changed(['patientId', 'medicationId', 'scheduleId', 'scheduledAt', 'medicationName']);
+      allow delete: if false; // histórico não é apagado silenciosamente
+
+      match /changes/{cid} {
+        allow read: if canSee(get(/databases/$(database)/documents/medication_logs/$(id)).data.patientId, 'canViewHistory');
+        allow create: if ownerVerified(getAfter(/databases/$(database)/documents/medication_logs/$(id)).data.patientId)
+          && request.resource.data.actorUid == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // ---------- consultas ----------
+    function validConsult(d) {
+      return str(d.professional, 100) && optStr(d.specialty, 100) && optStr(d.location, 200)
+        && optStr(d.notes, 1000) && d.dateTime is timestamp
+        && d.status in ['scheduled', 'done', 'cancelled']
+        && d.reminderMinutes is int && d.reminderMinutes >= 0 && d.reminderMinutes <= 10080;
+    }
+    match /consultations/{id} {
+      allow read: if canSee(resource.data.patientId, 'canViewConsultations');
+      allow create: if ownerVerified(request.resource.data.patientId) && validConsult(request.resource.data);
+      allow update: if ownerVerified(resource.data.patientId) && !changed(['patientId']) && validConsult(request.resource.data);
+      allow delete: if ownerVerified(resource.data.patientId);
+    }
+
+    // ---------- vínculos familiares (criados SOMENTE pela Cloud Function) ----------
+    match /family_relationships/{id} {
+      allow read: if verified() && (resource.data.patientId == request.auth.uid || resource.data.caregiverUid == request.auth.uid);
+      allow create, delete: if false;
+      allow update: if verified() && resource.data.status == 'active' && (
+        // paciente: altera permissões ou revoga
+        (resource.data.patientId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['permissions', 'status', 'updatedAt'])
+          && request.resource.data.status in ['active', 'revoked']
+          && request.resource.data.permissions.keys().hasOnly(['canViewMedications', 'canViewSchedules', 'canViewHistory', 'canReceiveNotifications', 'canViewConsultations']))
+        ||
+        // familiar: apenas deixa de acompanhar
+        (resource.data.caregiverUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status == 'left'));
+    }
+
+    // ---------- convites (criação/aceite via Cloud Function) ----------
+    match /invitations/{id} {
+      allow read: if verified() && (resource.data.patientId == request.auth.uid || resource.data.email == request.auth.token.email);
+      allow create, delete: if false;
+      allow update: if verified() && resource.data.patientId == request.auth.uid && resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status == 'cancelled';
+    }
+
+    // ---------- preferências, tokens e notificações ----------
+    match /notification_preferences/{uid} {
+      allow read: if verified() && request.auth.uid == uid;
+      allow create, update: if verified() && request.auth.uid == uid && request.resource.data.enabled is bool;
+      allow delete: if false;
+    }
+    match /device_tokens/{tid} {
+      allow read, delete: if verified() && resource.data.uid == request.auth.uid;
+      allow create, update: if verified() && request.resource.data.uid == request.auth.uid
+        && tid.matches('^' + request.auth.uid + '_.*')
+        && str(request.resource.data.token, 4096);
+    }
+    match /notifications/{id} {
+      allow read: if verified() && resource.data.userId == request.auth.uid;
+      allow update: if verified() && resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if false;
+    }
+    // notification_events (idempotência) e qualquer outra coleção: negado por padrão.
+  }
+}

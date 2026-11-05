@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1013232630078",
+    "project_id": "cuida-plus-7326b",
+    "storage_bucket": "cuida-plus-7326b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1013232630078:android:2e3a7bf155734d7687146f",
+        "android_client_info": {
+          "package_name": "br.com.seudominio.cuida_plus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAxxaq9hnV2iY4mjeOmBGphZWxfrJ6hG78"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

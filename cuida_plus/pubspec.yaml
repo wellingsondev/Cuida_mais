@@ -1,0 +1,41 @@
+name: cuida_plus
+description: Cuida+ - medicamentos, consultas e acompanhamento familiar.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+# Versões "any": o pub resolve as versões estáveis compatíveis na data do `flutter pub get`.
+# Depois do primeiro build bem-sucedido, o pubspec.lock fixa as versões. Veja README.md.
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_riverpod: any
+  go_router: any
+  intl: any
+  firebase_core: any
+  firebase_auth: any
+  cloud_firestore: any
+  cloud_functions: any
+  firebase_messaging: any
+  firebase_app_check: any
+  firebase_crashlytics: any
+  firebase_analytics: any
+  flutter_local_notifications: any
+  timezone: any
+  flutter_timezone: any
+  shared_preferences: any
+  crypto: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: any
+
+flutter:
+  uses-material-design: true
